@@ -33,6 +33,18 @@ $properties[0] = array(
 		'desc' => 'Whether to minify the JS or not',
 	),
 	array(
+		'name' => 'combineCss',
+		'value' => true,
+		'type' => 'combo-boolean',
+		'desc' => 'Whether to combine the CSS files or not',
+	),
+	array(
+		'name' => 'combineJs',
+		'value' => true,
+		'type' => 'combo-boolean',
+		'desc' => 'Whether to combine the JS files or not',
+	),
+	array(
 		'name' => 'cacheFolder',
 		'value' => '/assets/components/minifyx/cache/',
 		'type' => 'textfield',

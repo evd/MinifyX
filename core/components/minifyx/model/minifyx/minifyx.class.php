@@ -53,12 +53,18 @@ class MinifyX {
 			,'cacheFolder' => $assetsPath.'cache/'
 			,'cacheFolderUrl' => $assetsUrl.'cache/'
 			,'basePath' => MODX_BASE_PATH
+			,'baseUrl' => MODX_BASE_URL
 			,'cssFilename' => 'styles'
 			,'jsFilename' => 'scripts'
 			,'jsSources' => ''
 			,'cssSources' => ''
 			,'minifyCss' => 1
 			,'minifyJs' => 1
+			,'combineCss' => 1
+			,'combineJs' => 1
+			,'cssTpl' => '<link rel="stylesheet" type="text/css" href="[[+file]]" />'
+			,'jsTpl' => '<script type="text/javascript" src="[[+file]]"></script>'
+			,'outputSeparator' => "\n"
 		),$config);
 		if (!empty($config['jsSources'])) {$this->config['jsSources'] = explode(',', str_replace("\n",'', trim($config['jsSources'])));}
 		if (!empty($config['cssSources'])) {$this->config['cssSources'] = explode(',', str_replace("\n",'', trim($config['cssSources'])));}
@@ -125,16 +131,32 @@ class MinifyX {
 	 */
 	public function minify() {
 		// Javascript
-		if ($jsFile = $this->processJs($this->config['jsSources'])) {
-			$this->modx->setPlaceholder('MinifyX.javascript', '<script type="text/javascript" src="'.$this->config['cacheFolderUrl'].$jsFile.'"></script>');
+		if ($jsFiles = $this->processJs()) {
+			$this->modx->setPlaceholder('MinifyX.javascript', $this->prepareFilesForOutput($jsFiles, 'jsTpl'));
 		}
 		
 		//CSS
-		if ($cssFile = $this->processCss($this->config['cssSources'])) {
-			$this->modx->setPlaceholder('MinifyX.css', '<link rel="stylesheet" type="text/css" href="'.$this->config['cacheFolderUrl'].$cssFile.'" />');
+		if ($cssFiles = $this->processCss()) {
+			$this->modx->setPlaceholder('MinifyX.css', $this->prepareFilesForOutput($cssFiles, 'cssTpl'));
 		}
 		
 		return;
+	}
+
+	/**
+	 * Templating files
+	 *
+	 * @access public
+	 * @param array $files Filses for output
+	 * @param string $tplName Template name in config
+	 * @return string 
+	 */
+	public function prepareFilesForOutput($files, $tplName) {
+		$tpl = $this->config[$tplName];
+		foreach($files as $k => $file) {
+			$files[$k] = str_replace('[[+file]]', $file, $tpl);
+		}
+		return implode($this->config['outputSeparator'], $files);
 	}
 	
 
@@ -145,37 +167,46 @@ class MinifyX {
 	 * @return boolean
 	 */
 	function processJs() {
-		$file = $this->config['cacheFolder'].$this->config['jsFile'].$this->config['jsExt'];
-		$output = '';
-		$maxtime = 0;
-		foreach($this->config['jsSources'] as $source) {
-			$source = str_replace('//', '/', $this->config['basePath'].trim($source));
-			if (is_file($source)) {
-				$output .= file_get_contents($source)."\n";	
-				$filetime = filemtime($source);
-				if ($filetime > $maxtime) {$maxtime = $filetime;}
-			} else {
-				$this->modx->log(modX::LOG_LEVEL_ERROR, '[MinifyX] Could not find file: '.$source);
+		$result = array();
+		if ($this->config['combineJs']) {
+			$file = $this->config['cacheFolder'].$this->config['jsFile'].$this->config['jsExt'];
+			$output = '';
+			$maxtime = 0;
+			foreach($this->config['jsSources'] as $source) {
+				$source = str_replace('//', '/', $this->config['basePath'].trim($source));
+				if (is_file($source)) {
+					$output .= file_get_contents($source)."\n";	
+					$filetime = filemtime($source);
+					if ($filetime > $maxtime) {$maxtime = $filetime;}
+				} else {
+					$this->modx->log(modX::LOG_LEVEL_ERROR, '[MinifyX] Could not find file: '.$source);
+				}
 			}
-		}
-		if (is_file($file)) {
-			$mintime = filemtime($file);
-			if ($mintime > $maxtime) {
-				return $this->config['jsFile'].$this->config['jsExt'];
+			if (is_file($file)) {
+				$mintime = filemtime($file);
+				if ($mintime > $maxtime) {
+					$result[] = $this->config['cacheFolderUrl'].$this->config['jsFile'].$this->config['jsExt'];
+					return $result;
+				}
 			}
-		}
-		if ($this->config['minifyJs']) {
-			require_once 'jsmin.class.php';
-			$output = JSMin::minify($output);
-		}
+			if ($this->config['minifyJs']) {
+				require_once 'jsmin.class.php';
+				$output = JSMin::minify($output);
+			}
 
-		if (!file_put_contents($file, $output)) {
-			$this->modx->log(modX::LOG_LEVEL_ERROR, '[MinifyX] Could not write JS cache file!');
-			return false;
+			if (!file_put_contents($file, $output)) {
+				$this->modx->log(modX::LOG_LEVEL_ERROR, '[MinifyX] Could not write JS cache file!');
+				return false;
+			}
+			$newname = $this->config['jsFilename'].'_'.time().$this->config['jsExt'];
+			rename($file, $this->config['cacheFolder'].$newname);
+			$result[] = $this->config['cacheFolderUrl'] . $newname;
+		} else {
+			foreach($this->config['jsSources'] as $source) {
+				$result[] = str_replace('//', '/', $this->config['baseUrl'].trim($source));
+			}
 		}
-		$newname = $this->config['jsFilename'].'_'.time().$this->config['jsExt'];
-		rename($file, $this->config['cacheFolder'].$newname);
-		return $newname;
+		return $result;
 	}
 
 	
@@ -186,37 +217,46 @@ class MinifyX {
 	 * @return boolean
 	 */
 	function processCss() {
-		$file = $this->config['cacheFolder'].$this->config['cssFile'].$this->config['cssExt'];
-		$output = '';
-		$maxtime = 0;
-		foreach($this->config['cssSources'] as $source) {
-			$source = str_replace('//', '/', $this->config['basePath'].trim($source));
-			if (is_file($source)) {
-				$output .= file_get_contents($source)."\n";
-				$filetime = filemtime($source);
-				if ($filetime > $maxtime) {$maxtime = $filetime;}
-			} else {
-				$this->modx->log(modX::LOG_LEVEL_ERROR, '[MinifyX] Could not find file: '.$source);
+		$result = array();
+		if ($this->config['combineCss']) {
+			$file = $this->config['cacheFolder'].$this->config['cssFile'].$this->config['cssExt'];
+			$output = '';
+			$maxtime = 0;
+			foreach($this->config['cssSources'] as $source) {
+				$source = str_replace('//', '/', $this->config['basePath'].trim($source));
+				if (is_file($source)) {
+					$output .= file_get_contents($source)."\n";
+					$filetime = filemtime($source);
+					if ($filetime > $maxtime) {$maxtime = $filetime;}
+				} else {
+					$this->modx->log(modX::LOG_LEVEL_ERROR, '[MinifyX] Could not find file: '.$source);
+				}
+			}
+			if (is_file($file)) {
+				$mintime = filemtime($file);
+				if ($mintime > $maxtime) {
+					$result[] = $this->config['cacheFolderUrl'].$this->config['cssFile'].$this->config['cssExt'];
+					return $result;
+				}
+			}
+			if ($this->config['minifyCss']) {
+				require_once 'cssmin.class.php';
+				$output = Minify_CSS_Compressor::process($output);
+			}
+			
+			if (!file_put_contents($file, $output)) {
+				$this->modx->log(modX::LOG_LEVEL_ERROR,'[MinifyX] Could not write CSS cache file!');
+				return false;
+			}
+			$newname = $this->config['cssFilename'].'_'.time().$this->config['cssExt'];
+			rename($file, $this->config['cacheFolder'].$newname);
+			$result[] = $this->config['cacheFolderUrl'] . $newname;
+		} else {
+			foreach($this->config['cssSources'] as $source) {
+				$result[] = str_replace('//', '/', $this->config['baseUrl'].trim($source));
 			}
 		}
-		if (is_file($file)) {
-			$mintime = filemtime($file);
-			if ($mintime > $maxtime) {
-				return $this->config['cssFile'].$this->config['cssExt'];
-			}
-		}
-		if ($this->config['minifyCss']) {
-			require_once 'cssmin.class.php';
-			$output = Minify_CSS_Compressor::process($output);
-		}
-		
-		if (!file_put_contents($file, $output)) {
-			$this->modx->log(modX::LOG_LEVEL_ERROR,'[MinifyX] Could not write CSS cache file!');
-			return false;
-		}
-		$newname = $this->config['cssFilename'].'_'.time().$this->config['cssExt'];
-		rename($file, $this->config['cacheFolder'].$newname);
-		return $newname;
+		return $result;
 	}
 	
 	
